@@ -8,3 +8,5 @@ class CacheNode:
         self.expiry_time = time.time() + ttl if ttl else None
         self.next = None
         self.prev = None
+        self.frequency = 1 
+        self.freq_node = None

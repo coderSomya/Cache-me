@@ -3,7 +3,7 @@ import time
 import pickle
 import json
 from .cache_node import CacheNode
-from .eviction_policies import evict_fifo, evict_lru, evict_lifo
+from .eviction_policies import evict_fifo, evict_lru, evict_lifo, evict_lfu, increment_frequency, add_frequency_node, remove_frequency_node, FrequencyNode
 from .custom_exceptions import EvictionPolicyNotSupported
 from .callbacks import Callbacks
 
@@ -16,11 +16,18 @@ class Cache:
         self.lock = threading.Lock()
         self.callbacks = Callbacks()
 
+
+        # Frequency map and minimum frequency node for LFU
+        self.frequency_map = {}
+        self.min_frequency_node = None
+
+        #for lru, fifo
         self.head = CacheNode(None, None)  
         self.tail = CacheNode(None, None) 
         self.head.next = self.tail
         self.tail.prev = self.head
 
+        #for lifo
         self.stack = []
 
     def get(self, key):
@@ -36,6 +43,8 @@ class Cache:
                 if self.eviction_policy == 'LRU':
                     self._remove(node)
                     self._add(node)
+                elif self.eviction_policy == 'LFU':
+                    increment_frequency(self, node)
                 self.callbacks.execute_hit_callbacks(key)
                 return node.value
             self.callbacks.execute_miss_callbacks(key)
@@ -49,31 +58,52 @@ class Cache:
                 node.value = value
                 node.ttl = ttl
                 node.expiry_time = time.time() + ttl if ttl else None
-                self._add(node)
+                if self.eviction_policy == 'LFU':
+                    increment_frequency(self, node)
+                else:
+                    self._add(node)
             else:
                 if self.size == self.capacity:
                     self._evict()
                 new_node = CacheNode(key, value, ttl)
                 self.cache[key] = new_node
                 self._add(new_node)
+                if self.eviction_policy == 'LFU':
+                    add_frequency_node(self, new_node)
                 self.size += 1
 
     def _remove(self, node):
-        node.prev.next = node.next
-        node.next.prev = node.prev
+        if self.eviction_policy in ['FIFO', 'LRU']:
+            node.prev.next = node.next
+            node.next.prev = node.prev
+        elif self.eviction_policy == 'LFU':
+            freq_node = node.freq_node
+            del freq_node.items[node.key]
+            if not freq_node.items:
+                remove_frequency_node(self, freq_node)
+            node.prev.next = node.next
+            node.next.prev = node.prev
 
     def _add(self, node):
-        last = self.tail.prev
-        last.next = node
-        node.prev = last
-        node.next = self.tail
-        self.tail.prev = node
+        if self.eviction_policy in ['FIFO', 'LRU']:
+            last = self.tail.prev
+            last.next = node
+            node.prev = last
+            node.next = self.tail
+            self.tail.prev = node
+        elif self.eviction_policy == 'LFU':
+            if 1 not in self.frequency_map:
+                add_frequency_node(self, FrequencyNode(1))
+            freq_node = self.frequency_map[1]
+            freq_node.items[node.key] = node
+            node.freq_node = freq_node
 
     def _evict(self):
         eviction_methods = {
             'FIFO': evict_fifo,
             'LRU': evict_lru,
             'LIFO': evict_lifo,
+            'LFU': evict_lfu,
         }
         if self.eviction_policy not in eviction_methods:
             raise EvictionPolicyNotSupported(f"Unsupported eviction policy: {self.eviction_policy}")
@@ -112,9 +142,18 @@ class Cache:
     
     def display_cache(self):
         with self.lock:
-            current = self.head.next
-            cache_state = []
-            while current != self.tail:
-                cache_state.append(f"{current.key}: {current.value}")
-                current = current.next
-            return " -> ".join(cache_state)
+            if self.eviction_policy == 'LFU':
+                freq_node = self.min_frequency_node
+                cache_state = []
+                while freq_node:
+                    for key, node in freq_node.items.items():
+                        cache_state.append(f"{key}: {node.value} (Freq: {node.frequency})")
+                    freq_node = freq_node.next
+                return " -> ".join(cache_state)
+            else:
+                current = self.head.next
+                cache_state = []
+                while current != self.tail:
+                    cache_state.append(f"{current.key}: {current.value}")
+                    current = current.next
+                return " -> ".join(cache_state)
