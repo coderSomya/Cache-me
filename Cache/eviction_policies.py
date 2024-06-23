@@ -26,22 +26,25 @@ def evict_lfu(cache):
     if not cache.min_frequency_node:
         return
     min_freq_items = cache.min_frequency_node.items
-    key_to_remove, node_to_remove = next(iter(min_freq_items.items()))
+    key_to_remove = next(iter(min_freq_items))
+    node_to_remove = min_freq_items.pop(key_to_remove)
     cache._remove(node_to_remove)
     del cache.cache[key_to_remove]
-    del min_freq_items[key_to_remove]
     if not min_freq_items:
         cache._remove_frequency_node(cache.min_frequency_node)
     cache.size -= 1
 
 def increment_frequency(cache, node):
     freq_node = node.freq_node
-    del freq_node.items[node.key]
-    if not freq_node.items:
-        cache._remove_frequency_node(freq_node)
+    if node.key in freq_node.items:
+        del freq_node.items[node.key]
+        if not freq_node.items:
+            cache._remove_frequency_node(freq_node)
     node.frequency += 1
     if node.frequency not in cache.frequency_map:
-        cache._add_frequency_node(FrequencyNode(node.frequency))
+        new_freq_node = FrequencyNode(node.frequency)
+        add_frequency_node(cache, new_freq_node)
+        cache.frequency_map[node.frequency] = new_freq_node
     cache.frequency_map[node.frequency].items[node.key] = node
     node.freq_node = cache.frequency_map[node.frequency]
 
@@ -61,7 +64,7 @@ def add_frequency_node(cache, node):
             current.next.prev = node
         current.next = node
         node.prev = current
-
+        
 def remove_frequency_node(cache, node):
     del cache.frequency_map[node.frequency]
     if node.prev:
@@ -69,4 +72,4 @@ def remove_frequency_node(cache, node):
     if node.next:
         node.next.prev = node.prev
     if cache.min_frequency_node == node:
-        cache.min_frequency_node = node.next
+        cache.min_frequency_node = node.next if node.next.frequency == node.frequency else None

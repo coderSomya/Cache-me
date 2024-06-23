@@ -10,25 +10,26 @@ from .callbacks import Callbacks
 class Cache:
     def __init__(self, capacity, eviction_policy='LRU'):
         self.capacity = capacity
-        self.eviction_policy = eviction_policy
         self.cache = {}
         self.size = 0
         self.lock = threading.Lock()
         self.callbacks = Callbacks()
 
-
         # Frequency map and minimum frequency node for LFU
         self.frequency_map = {}
         self.min_frequency_node = None
 
-        #for lru, fifo
+        # For LRU and FIFO
         self.head = CacheNode(None, None)  
-        self.tail = CacheNode(None, None) 
+        self.tail = CacheNode(None, None)  
         self.head.next = self.tail
         self.tail.prev = self.head
 
-        #for lifo
+        # For LIFO
         self.stack = []
+
+        # Initialize eviction policy
+        self.eviction_policy = eviction_policy
 
     def get(self, key):
         with self.lock:
@@ -69,20 +70,30 @@ class Cache:
                 self.cache[key] = new_node
                 self._add(new_node)
                 if self.eviction_policy == 'LFU':
-                    add_frequency_node(self, new_node)
+                    if 1 not in self.frequency_map:
+                        new_freq_node = FrequencyNode(1)
+                        add_frequency_node(self, new_freq_node)
+                        self.frequency_map[1] = new_freq_node
+                    self.frequency_map[1].items[key] = new_node
+                    new_node.freq_node = self.frequency_map[1]
                 self.size += 1
 
     def _remove(self, node):
         if self.eviction_policy in ['FIFO', 'LRU']:
-            node.prev.next = node.next
-            node.next.prev = node.prev
+            if node.prev:
+                node.prev.next = node.next
+            if node.next:
+                node.next.prev = node.prev
         elif self.eviction_policy == 'LFU':
             freq_node = node.freq_node
-            del freq_node.items[node.key]
-            if not freq_node.items:
-                remove_frequency_node(self, freq_node)
-            node.prev.next = node.next
-            node.next.prev = node.prev
+            if freq_node and node.key in freq_node.items:
+                del freq_node.items[node.key]
+                if not freq_node.items:
+                    self._remove_frequency_node(freq_node)
+            if node.prev:
+                node.prev.next = node.next
+            if node.next:
+                node.next.prev = node.prev
 
     def _add(self, node):
         if self.eviction_policy in ['FIFO', 'LRU']:
@@ -93,10 +104,21 @@ class Cache:
             self.tail.prev = node
         elif self.eviction_policy == 'LFU':
             if 1 not in self.frequency_map:
-                add_frequency_node(self, FrequencyNode(1))
+                new_freq_node = FrequencyNode(1)
+                add_frequency_node(self, new_freq_node)
+                self.frequency_map[1] = new_freq_node
             freq_node = self.frequency_map[1]
             freq_node.items[node.key] = node
             node.freq_node = freq_node
+
+    def _remove_frequency_node(self, freq_node):
+        del self.frequency_map[freq_node.frequency]
+        if freq_node.prev:
+            freq_node.prev.next = freq_node.next
+        if freq_node.next:
+            freq_node.next.prev = freq_node.prev
+        if self.min_frequency_node == freq_node:
+            self.min_frequency_node = freq_node.next
 
     def _evict(self):
         eviction_methods = {
@@ -110,9 +132,6 @@ class Cache:
 
         eviction_methods[self.eviction_policy](self)
         self.callbacks.execute_eviction_callbacks()
-
-    def add_custom_eviction_policy(self, policy_name, policy_function):
-        setattr(self, f"_evict_{policy_name.lower()}", policy_function)
 
     def save_to_file(self, filename):
         with open(filename, 'wb') as f:
@@ -139,7 +158,7 @@ class Cache:
             'size': self.size,
             'capacity': self.capacity
         }
-    
+
     def display_cache(self):
         with self.lock:
             if self.eviction_policy == 'LFU':
@@ -157,3 +176,6 @@ class Cache:
                     cache_state.append(f"{current.key}: {current.value}")
                     current = current.next
                 return " -> ".join(cache_state)
+
+    def add_custom_eviction_policy(self, policy_name, policy_function):
+        setattr(self, f"_evict_{policy_name.lower()}", policy_function)

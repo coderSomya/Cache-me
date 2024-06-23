@@ -2,7 +2,7 @@ from Cache import Cache
 
 print("Welcome to the In-Memory Cache System")
 
-eviction_policy = input("Enter eviction policy (FIFO, LRU, LIFO): ").strip().upper()
+eviction_policy = input("Enter eviction policy (FIFO, LRU, LIFO, LFU): ").strip().upper()
 capacity = int(input("Enter cache capacity: "))
 
 cache = Cache(capacity, eviction_policy)
