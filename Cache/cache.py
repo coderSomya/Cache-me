@@ -84,6 +84,9 @@ class Cache:
                 node.prev.next = node.next
             if node.next:
                 node.next.prev = node.prev
+        elif self.eviction_policy == 'LIFO':
+            if node in self.stack:
+                self.stack.remove(node)
         elif self.eviction_policy == 'LFU':
             freq_node = node.freq_node
             if freq_node and node.key in freq_node.items:
@@ -102,6 +105,10 @@ class Cache:
             node.prev = last
             node.next = self.tail
             self.tail.prev = node
+
+        elif self.eviction_policy == 'LIFO':
+            self.stack.append(node)
+            
         elif self.eviction_policy == 'LFU':
             if 1 not in self.frequency_map:
                 new_freq_node = FrequencyNode(1)
